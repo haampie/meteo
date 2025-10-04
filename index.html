@@ -98,7 +98,7 @@
             const files = [];
             for (let hour = 15; hour < 19; hour++) {
                 for (let minute = 0; minute < 60; minute += 5) {
-                    const timeStr = String(hour).padStart(2, '0') + String(minute).padStart(2, '0');
+                    const timeStr = String(hour).padStart(2, "0") + String(minute).padStart(2, "0");
                     files.push(`radar_rzc.20251004_${timeStr}.json`);
                 }
             }
@@ -123,39 +123,39 @@
                         }
                     });
 
-                    map.addSource('carto-base', {
-                        type: 'raster',
+                    map.addSource("carto-base", {
+                        type: "raster",
                         tiles: [
-                            'https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png',
-                            'https://b.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png',
-                            'https://c.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png'
+                            "https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
+                            "https://b.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
+                            "https://c.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png"
                         ],
                         tileSize: 256,
                     });
                     map.addLayer({
-                        id: 'carto-base-layer',
-                        type: 'raster',
-                        source: 'carto-base',
+                        id: "carto-base-layer",
+                        type: "raster",
+                        source: "carto-base",
                         paint: {
-                            'raster-opacity': 0.75
+                            "raster-opacity": 0.75
                         }
                     });
 
-                    map.addSource('carto-labels', {
-                        type: 'raster',
+                    map.addSource("carto-labels", {
+                        type: "raster",
                         tiles: [
-                            'https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
-                            'https://b.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
-                            'https://c.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png'
+                            "https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
+                            "https://b.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
+                            "https://c.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png"
                         ],
                         tileSize: 256
                     });
                     map.addLayer({
-                        id: 'carto-labels-layer',
-                        type: 'raster',
-                        source: 'carto-labels',
+                        id: "carto-labels-layer",
+                        type: "raster",
+                        source: "carto-labels",
                         paint: {
-                            'raster-opacity': 1
+                            "raster-opacity": 1
                         }
                     });
 
@@ -177,10 +177,10 @@
                             
                             // Create UTC date and convert to local time
                             const utcDate = new Date(Date.UTC(year, month - 1, day, hours, minutes));
-                            const localHours = String(utcDate.getHours()).padStart(2, '0');
-                            const localMinutes = String(utcDate.getMinutes()).padStart(2, '0');
-                            const localDay = String(utcDate.getDate()).padStart(2, '0');
-                            const localMonth = String(utcDate.getMonth() + 1).padStart(2, '0');
+                            const localHours = String(utcDate.getHours()).padStart(2, "0");
+                            const localMinutes = String(utcDate.getMinutes()).padStart(2, "0");
+                            const localDay = String(utcDate.getDate()).padStart(2, "0");
+                            const localMonth = String(utcDate.getMonth() + 1).padStart(2, "0");
                             const localYear = utcDate.getFullYear();
                             
                             document.getElementById("timestamp").textContent = 
@@ -196,8 +196,8 @@
                     }
                     
                     // Update timestamp when source data is loaded
-                    map.on('sourcedata', (e) => {
-                        if (e.sourceId === 'radar' && e.isSourceLoaded && pendingFrame !== null) {
+                    map.on("sourcedata", (e) => {
+                        if (e.sourceId === "radar" && e.isSourceLoaded && pendingFrame !== null) {
                             const endTime = performance.now();
                             if (setDataTime !== null) {
                                 console.log(`Time from setData to sourcedata: ${(endTime - setDataTime).toFixed(2)}ms`);
@@ -211,13 +211,13 @@
                     updateTimestamp(frame);
                     
                     // Keyboard navigation
-                    document.addEventListener('keydown', (e) => {
-                        if (e.key === 'ArrowRight') {
+                    document.addEventListener("keydown", (e) => {
+                        if (e.key === "ArrowRight") {
                             e.preventDefault();
                             if (frame < geojsonFrames.length - 1) {
                                 updateFrame(frame + 1);
                             }
-                        } else if (e.key === 'ArrowLeft') {
+                        } else if (e.key === "ArrowLeft") {
                             e.preventDefault();
                             if (frame > 0) {
                                 updateFrame(frame - 1);
@@ -226,15 +226,51 @@
                     });
                     
                     // Mobile button navigation
-                    document.getElementById('prevBtn').addEventListener('click', () => {
+                    let animationTimer = null;
+
+                    function handleHold(button, action) {
+                        const start = (e) => {
+                            e.preventDefault();
+                            action();
+                            
+                            // After a delay, start repeating the action
+                            animationTimer = setTimeout(() => {
+                                animationTimer = setInterval(action, 100);
+                            }, 300);
+                        };
+
+                        const stop = () => {
+                            clearTimeout(animationTimer);
+                            clearInterval(animationTimer);
+                        };
+
+                        // Mouse events
+                        button.addEventListener("mousedown", start);
+                        button.addEventListener("mouseup", stop);
+                        button.addEventListener("mouseleave", stop);
+
+                        // Touch events
+                        button.addEventListener("touchstart", start);
+                        button.addEventListener("touchend", stop);
+                    }
+
+                    // Apply the logic to the previous button
+                    handleHold(document.getElementById("prevBtn"), () => {
                         if (frame > 0) {
                             updateFrame(frame - 1);
+                        } else {
+                            clearTimeout(animationTimer);
+                            clearInterval(animationTimer);
                         }
                     });
-                    
-                    document.getElementById('nextBtn').addEventListener('click', () => {
+
+                    // Apply the logic to the next button
+                    handleHold(document.getElementById("nextBtn"), () => {
                         if (frame < geojsonFrames.length - 1) {
                             updateFrame(frame + 1);
+                        } else {
+                            clearTimeout(animationTimer);
+                            clearInterval(animationTimer);
                         }
                     });
                 });
