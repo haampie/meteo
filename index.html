@@ -77,21 +77,17 @@
     <script>
         const map = new maplibregl.Map({
             container: "map",
-            style: "https://tiles.openfreemap.org/styles/bright",
+            style: {
+                version: 8,
+                sources: {},
+                layers: []
+            },
             center: [8.357426707652651, 46.914080187871534],
-            zoom: 7.4
+            zoom: 7.4,
+            keyboard: false
         });
 
         map.on("load", () => {
-            const layers = map.getStyle().layers;
-            let firstSymbolId;
-            for (let i = 0; i < layers.length; i++) {
-                if (layers[i].type === "symbol") {
-                    firstSymbolId = layers[i].id;
-                    break;
-                }
-            }
-            
             // Generate file list
             const files = [];
             for (let hour = 15; hour < 19; hour++) {
@@ -101,15 +97,13 @@
                 }
             }
 
-            console.log("Files to load:", files);
-
             Promise.all(files.map(file => fetch(file).then(response => response.json())))
                 .then(allData => {
                     const geojsonFrames = allData.map(data => transformToGeoJSON(data));
 
                     map.addSource("radar", {
                         "type": "geojson",
-                        "data": geojsonFrames[0]
+                        "data": geojsonFrames[geojsonFrames.length - 1]
                     });
 
                     map.addLayer({
@@ -119,12 +113,47 @@
                         "layout": {},
                         "paint": {
                             "fill-color": ["get", "color"],
-                            "fill-opacity": .5
+                            "fill-opacity": 1
                         }
-                    },
-                        firstSymbolId);
+                    });
 
-                    let frame = 0;
+                    map.addSource('carto-base', {
+                        type: 'raster',
+                        tiles: [
+                            'https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png',
+                            'https://b.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png',
+                            'https://c.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png'
+                        ],
+                        tileSize: 256,
+                    });
+                    map.addLayer({
+                        id: 'carto-base-layer',
+                        type: 'raster',
+                        source: 'carto-base',
+                        paint: {
+                            'raster-opacity': 0.75
+                        }
+                    });
+
+                    map.addSource('carto-labels', {
+                        type: 'raster',
+                        tiles: [
+                            'https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
+                            'https://b.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
+                            'https://c.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png'
+                        ],
+                        tileSize: 256
+                    });
+                    map.addLayer({
+                        id: 'carto-labels-layer',
+                        type: 'raster',
+                        source: 'carto-labels',
+                        paint: {
+                            'raster-opacity': 1
+                        }
+                    });
+
+                    let frame = geojsonFrames.length - 1;
                     let pendingFrame = null;
                     let setDataTime = null;
                     
