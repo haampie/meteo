@@ -34,6 +34,7 @@
             width: 200px;
             text-align: center;
             user-select: none;
+            -webkit-user-select: none;
         }
 
         #controls {
@@ -45,16 +46,19 @@
         }
 
         button {
-            width: 80px;
-            height: 80px;
+            padding: 20px;
             background-color: rgba(255, 255, 255, 0.9);
             border: none;
             border-radius: 8px;
-            font-size: 32px;
+            font-size: 40px;
+            line-height: 1;
             cursor: pointer;
             box-shadow: 0 2px 8px rgba(0,0,0,0.3);
             user-select: none;
-            text-align: center;
+            -webkit-user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         button:active {
