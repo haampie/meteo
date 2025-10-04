@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Meteo</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.8.0/dist/maplibre-gl.css" />
+    <script src="https://unpkg.com/maplibre-gl@5.8.0/dist/maplibre-gl.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body,
+        #map {
+            height: 100%;
+        }
+
+        #timestamp {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 10px 15px;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            font-weight: bold;
+            width: 200px;
+            text-align: center;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 50px;
+            right: 30px;
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            width: 80px;
+            height: 80px;
+            background-color: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 8px;
+            font-size: 32px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        button:active {
+            background-color: rgba(200, 200, 200, 0.9);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+    <div id="timestamp">...</div>
+    <div id="controls">
+        <button id="prevBtn">←</button>
+        <button id="nextBtn">→</button>
+    </div>
+    <script>
+        const map = new maplibregl.Map({
+            container: "map",
+            style: "https://tiles.openfreemap.org/styles/bright",
+            center: [8.357426707652651, 46.914080187871534],
+            zoom: 7.4
+        });
+
+        map.on("load", () => {
+            const layers = map.getStyle().layers;
+            let firstSymbolId;
+            for (let i = 0; i < layers.length; i++) {
+                if (layers[i].type === "symbol") {
+                    firstSymbolId = layers[i].id;
+                    break;
+                }
+            }
+            
+            // Generate file list
+            const files = [];
+            for (let hour = 15; hour < 19; hour++) {
+                for (let minute = 0; minute < 60; minute += 5) {
+                    const timeStr = String(hour).padStart(2, '0') + String(minute).padStart(2, '0');
+                    files.push(`radar_rzc.20251004_${timeStr}.json`);
+                }
+            }
+
+            console.log("Files to load:", files);
+
+            Promise.all(files.map(file => fetch(file).then(response => response.json())))
+                .then(allData => {
+                    const geojsonFrames = allData.map(data => transformToGeoJSON(data));
+
+                    map.addSource("radar", {
+                        "type": "geojson",
+                        "data": geojsonFrames[0]
+                    });
+
+                    map.addLayer({
+                        "id": "radar-layer",
+                        "type": "fill",
+                        "source": "radar",
+                        "layout": {},
+                        "paint": {
+                            "fill-color": ["get", "color"],
+                            "fill-opacity": .75
+                        }
+                    },
+                        firstSymbolId);
+
+                    let frame = 0;
+                    let pendingFrame = null;
+                    let setDataTime = null;
+                    
+                    function updateTimestamp(frameIndex) {
+                        const filename = files[frameIndex];
+                        const match = filename.match(/(\d{8})_(\d{4})/);
+                        if (match) {
+                            const date = match[1];
+                            const time = match[2];
+                            const year = date.substring(0, 4);
+                            const month = date.substring(4, 6);
+                            const day = date.substring(6, 8);
+                            const hours = parseInt(time.substring(0, 2));
+                            const minutes = time.substring(2, 4);
+                            
+                            // Create UTC date and convert to local time
+                            const utcDate = new Date(Date.UTC(year, month - 1, day, hours, minutes));
+                            const localHours = String(utcDate.getHours()).padStart(2, '0');
+                            const localMinutes = String(utcDate.getMinutes()).padStart(2, '0');
+                            const localDay = String(utcDate.getDate()).padStart(2, '0');
+                            const localMonth = String(utcDate.getMonth() + 1).padStart(2, '0');
+                            const localYear = utcDate.getFullYear();
+                            
+                            document.getElementById("timestamp").textContent = 
+                                `${localYear}-${localMonth}-${localDay} ${localHours}:${localMinutes}`;
+                        }
+                    }
+                    
+                    function updateFrame(newFrame) {
+                        frame = newFrame;
+                        pendingFrame = frame;
+                        setDataTime = performance.now();
+                        map.getSource("radar").setData(geojsonFrames[frame]);
+                    }
+                    
+                    // Update timestamp when source data is loaded
+                    map.on('sourcedata', (e) => {
+                        if (e.sourceId === 'radar' && e.isSourceLoaded && pendingFrame !== null) {
+                            const endTime = performance.now();
+                            if (setDataTime !== null) {
+                                console.log(`Time from setData to sourcedata: ${(endTime - setDataTime).toFixed(2)}ms`);
+                            }
+                            updateTimestamp(pendingFrame);
+                            pendingFrame = null;
+                            setDataTime = null;
+                        }
+                    });
+                    
+                    updateTimestamp(frame);
+                    
+                    // Keyboard navigation
+                    document.addEventListener('keydown', (e) => {
+                        if (e.key === 'ArrowRight') {
+                            e.preventDefault();
+                            if (frame < geojsonFrames.length - 1) {
+                                updateFrame(frame + 1);
+                            }
+                        } else if (e.key === 'ArrowLeft') {
+                            e.preventDefault();
+                            if (frame > 0) {
+                                updateFrame(frame - 1);
+                            }
+                        }
+                    });
+                    
+                    // Mobile button navigation
+                    document.getElementById('prevBtn').addEventListener('click', () => {
+                        if (frame > 0) {
+                            updateFrame(frame - 1);
+                        }
+                    });
+                    
+                    document.getElementById('nextBtn').addEventListener('click', () => {
+                        if (frame < geojsonFrames.length - 1) {
+                            updateFrame(frame + 1);
+                        }
+                    });
+                });
+        });
+
+        function transformToGeoJSON(data) {
+            const features = [];
+            
+            // Add white background rectangle based on coordinate bounds
+            const coords = data.coords;
+            const x_min_m = coords.x_min * 1000;
+            const x_max_m = coords.x_max * 1000;
+            const y_min_m = coords.y_min * 1000;
+            const y_max_m = coords.y_max * 1000;
+            
+            const [lon_min, lat_min] = CHtoWGS(x_min_m, y_min_m);
+            const [lon_max, lat_max] = CHtoWGS(x_max_m, y_max_m);
+            
+            features.push({
+                type: "Feature",
+                properties: {
+                    color: "#ffffff"
+                },
+                geometry: {
+                    type: "Polygon",
+                    coordinates: [[
+                        [lon_min, lat_min],
+                        [lon_max, lat_min],
+                        [lon_max, lat_max],
+                        [lon_min, lat_max],
+                        [lon_min, lat_min]
+                    ]]
+                }
+            });
+            
+            let lValue = 0;
+            for (;;) {
+                let nextLValue = -1;
+                data.areas.forEach(area => {
+                    area.shapes.forEach(shapeGroup => {
+                        shapeGroup.forEach(shape => {
+                            if (shape.l === lValue) {
+                                const polygonCoordinates = transformShapeToCoordinates(shape, data.coords);
+                                if (polygonCoordinates.length > 0) {
+                                    features.push({
+                                        type: "Feature",
+                                        properties: {
+                                            color: "#" + (area.color == "333e48" ? "ffffff" : area.color)
+                                        },
+                                        geometry: {
+                                            type: "Polygon",
+                                            coordinates: [polygonCoordinates]
+                                        }
+                                    });
+                                }
+                            } else if (shape.l > lValue) {
+                                if (nextLValue === -1 || shape.l < nextLValue) {
+                                    nextLValue = shape.l;
+                                }
+                            }
+                        });
+                    });
+                });
+
+                if (nextLValue === -1 || nextLValue >= 6) {
+                    break;
+                }
+                lValue = nextLValue;
+            }
+
+            return {
+                type: "FeatureCollection",
+                features: features
+            };
+        }
+
+        function transformShapeToCoordinates(shape, coords) {
+            let i = shape.i;
+            let j = shape.j;
+            const path = [];
+            let charIndex = 0;
+            for (; charIndex < shape.o.length;) {
+                let x, y;
+                const offset = parseInt(shape.o.charAt(charIndex)) / 10 + .05;
+                if (i % 2 == 0) {
+                    x = coords.x_min + (coords.x_max - coords.x_min) * (i / 2) / coords.x_count;
+                    y = coords.y_min + (coords.y_max - coords.y_min) * ((j - 1) / 2 + offset) / coords.y_count;
+                } else {
+                    x = coords.x_min + (coords.x_max - coords.x_min) * ((i - 1) / 2 + offset) / coords.x_count;
+                    y = coords.y_min + (coords.y_max - coords.y_min) * (j / 2) / coords.y_count;
+                }
+
+                const [lon, lat] = CHtoWGS(x * 1000, y * 1000);
+
+                path.push([lon, lat]);
+
+                if (2 * charIndex < shape.d.length) {
+                    i += shape.d.charCodeAt(2 * charIndex) - 77;
+                    j += shape.d.charCodeAt(2 * charIndex + 1) - 77;
+                }
+                charIndex++;
+            }
+            return path;
+        }
+
+        function LV03_95toCH(e, n) {
+            return {
+                x: e > 1e6 ? e - 2e6 : e,
+                y: n > 1e6 ? n - 1e6 : n
+            }
+        }
+
+        function CHtoWGS(e, n) {
+            return [CHtoWGSlng(e, n), CHtoWGSlat(e, n)]
+        }
+
+        function CHtoWGSlat(e, n) {
+            const t = LV03_95toCH(e, n),
+                r = (t.x - 6e5) / 1e6,
+                o = (t.y - 2e5) / 1e6;
+            let l = 16.9023892 + 3.238272 * o - .270978 * Math.pow(r, 2) - .002528 * Math.pow(o, 2) - .0447 * Math.pow(r, 2) * o - .014 * Math.pow(o, 3);
+            return l * 100 / 36;
+        }
+
+        function CHtoWGSlng(e, n) {
+            const t = LV03_95toCH(e, n),
+                r = (t.x - 6e5) / 1e6,
+                o = (t.y - 2e5) / 1e6;
+            let l = 2.6779094 + 4.728982 * r + .791484 * r * o + .1306 * r * Math.pow(o, 2) - .0436 * Math.pow(r, 3);
+            return l * 100 / 36;
+        }
+    </script>
+</body>
+
+</html>
