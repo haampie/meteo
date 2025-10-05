@@ -2,18 +2,38 @@
 <html lang="en">
 
 <head>
-    <title>Meteo</title>
+    <title>Meteo - Deck.gl</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    
+
     <!-- iOS Web App Configuration -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Meteo">
-    
-    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.8.0/dist/maplibre-gl.css" />
-    <script src="https://unpkg.com/maplibre-gl@5.8.0/dist/maplibre-gl.js"></script>
+
+    <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
+
     <style>
+        #container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .map-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #radar-container {
+            mix-blend-mode: multiply;
+            pointer-events: none;
+            /* Allow interactions with the map below */
+        }
+
         body {
             margin: 0;
             padding: 0;
@@ -22,24 +42,9 @@
         }
 
         html,
-        body {
+        body,
+        #container {
             height: 100%;
-        }
-
-        #map1, #map2 {
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 100%;
-        }
-
-        #map1 {
-            z-index: 1;
-        }
-
-        #map2 {
-            z-index: 2;
-            mix-blend-mode: multiply;
         }
 
         #timestamp {
@@ -76,7 +81,7 @@
             font-size: 40px;
             line-height: 1;
             cursor: pointer;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
             user-select: none;
             -webkit-user-select: none;
             display: flex;
@@ -91,190 +96,209 @@
 </head>
 
 <body>
-    <div id="map1"></div>
-    <div id="map2"></div>
+    <div id="container">
+        <div id="map-container" class="map-container"></div>
+        <div id="radar-container" class="map-container"></div>
+    </div>
     <div id="timestamp">...</div>
     <div id="controls">
         <button id="prevBtn">←</button>
         <button id="nextBtn">→</button>
     </div>
+
     <script>
-        const map1 = new maplibregl.Map({
-            container: "map1",
-            style: "https://tiles.openfreemap.org/styles/bright",
-            center: [8.357426707652651, 46.914080187871534],
+        const { DeckGL, GeoJsonLayer, TileLayer, BitmapLayer } = deck;
+
+        const INITIAL_VIEW_STATE = {
+            longitude: 8.357426707652651,
+            latitude: 46.914080187871534,
             zoom: 7.4,
-            keyboard: false,
-            maplibreLogo: false,
-            attributionControl: false
-        });
-        const map2 = new maplibregl.Map({
-            container: "map2",
-            style: {
-                version: 8,
-                sources: {},
-                layers: []
+            pitch: 0,
+            bearing: 0
+        };
+
+        const mapDeck = new DeckGL({
+            container: "map-container",
+            initialViewState: INITIAL_VIEW_STATE,
+            controller: {
+                scrollZoom: true,
+                dragPan: true,
+                dragRotate: false,
+                doubleClickZoom: true,
+                touchZoom: true,
+                touchRotate: false,
+                keyboard: false
             },
-            center: [8.357426707652651, 46.914080187871534],
-            zoom: 7.4,
-            keyboard: false,
-            maplibreLogo: false
-        });
-        map2.on('move', () => {
-            map1.jumpTo({
-                center: map2.getCenter(),
-                zoom: map2.getZoom(),
-                bearing: map2.getBearing(),
-                pitch: map2.getPitch()
-            });
-        });
-
-        map2.on("load", () => {
-            // Generate file list
-            const files = [];
-            for (let hour = 15; hour < 19; hour++) {
-                for (let minute = 0; minute < 60; minute += 5) {
-                    const timeStr = String(hour).padStart(2, "0") + String(minute).padStart(2, "0");
-                    files.push(`radar_rzc.20251004_${timeStr}.json`);
-                }
+            onViewStateChange: ({ viewState }) => {
+                radarDeck.setProps({ viewState });
             }
+        });
 
-            Promise.all(files.map(file => fetch(file).then(response => response.json())))
-                .then(allData => {
-                    const geojsonFrames = allData.map(data => transformToGeoJSON(data));
+        const radarDeck = new DeckGL({
+            container: "radar-container",
+            initialViewState: INITIAL_VIEW_STATE,
+            controller: false
+        });
 
-                    map2.addSource("radar", {
-                        "type": "geojson",
-                        "data": geojsonFrames[geojsonFrames.length - 1]
-                    });
+        // Generate file list
+        const urls = [];
+        const current_time = new Date();
+        // round current_time on 5 minutes
+        current_time.setUTCMinutes(Math.floor(current_time.getUTCMinutes() / 5) * 5);
+        current_time.setUTCSeconds(0);
+        current_time.setUTCMilliseconds(0);
+        for (let minutesAgo = 120; minutesAgo >= 0; minutesAgo -= 5) {
+            const time = new Date(current_time.getTime() - minutesAgo * 60000);
+            const year = time.getUTCFullYear();
+            const month = String(time.getUTCMonth() + 1).padStart(2, "0");
+            const day = String(time.getUTCDate()).padStart(2, "0");
+            const hours = String(time.getUTCHours()).padStart(2, "0");
+            const minutes = String(time.getUTCMinutes()).padStart(2, "0");
+            const timeStr = `${year}${month}${day}_${hours}${minutes}`;
+            urls.push(`data/radar_rzc.${timeStr}.json`);
+        }
+        console.log(urls);
 
-                    map2.addLayer({
-                        "id": "radar-layer",
-                        "type": "fill",
-                        "source": "radar",
-                        "layout": {},
-                        "paint": {
-                            "fill-color": ["get", "color"],
-                            "fill-opacity": 1
-                        }
-                    });
-
-                    let frame = geojsonFrames.length - 1;
-                    let pendingFrame = null;
-                    let setDataTime = null;
-                    
-                    function updateTimestamp(frameIndex) {
-                        const filename = files[frameIndex];
-                        const match = filename.match(/(\d{8})_(\d{4})/);
-                        if (match) {
-                            const date = match[1];
-                            const time = match[2];
-                            const year = date.substring(0, 4);
-                            const month = date.substring(4, 6);
-                            const day = date.substring(6, 8);
-                            const hours = parseInt(time.substring(0, 2));
-                            const minutes = time.substring(2, 4);
-                            
-                            // Create UTC date and convert to local time
-                            const utcDate = new Date(Date.UTC(year, month - 1, day, hours, minutes));
-                            const localHours = String(utcDate.getHours()).padStart(2, "0");
-                            const localMinutes = String(utcDate.getMinutes()).padStart(2, "0");
-                            const localDay = String(utcDate.getDate()).padStart(2, "0");
-                            const localMonth = String(utcDate.getMonth() + 1).padStart(2, "0");
-                            const localYear = utcDate.getFullYear();
-                            
-                            document.getElementById("timestamp").textContent = 
-                                `${localYear}-${localMonth}-${localDay} ${localHours}:${localMinutes}`;
-                        }
+        Promise.all(urls.map(file => fetch(file, {"mode": "cors"}).then(response => {
+            if (!response.ok) {
+                return null;
+            }
+            return response.json();
+        }).catch(() => null)))
+            .then(allData => {
+                // Filter out failed requests and keep track of successful ones with their timestamps
+                const successfulData = [];
+                const successfulTimestamps = [];
+                
+                allData.forEach((data, index) => {
+                    if (data !== null) {
+                        successfulData.push(data);
+                        successfulTimestamps.push(urls[index]);
                     }
-                    
-                    function updateFrame(newFrame) {
-                        frame = newFrame;
-                        pendingFrame = frame;
-                        setDataTime = performance.now();
-                        map2.getSource("radar").setData(geojsonFrames[frame]);
-                    }
-                    
-                    // Update timestamp when source data is loaded
-                    map2.on("sourcedata", (e) => {
-                        if (e.sourceId === "radar" && e.isSourceLoaded && pendingFrame !== null) {
-                            const endTime = performance.now();
-                            if (setDataTime !== null) {
-                                console.log(`Time from setData to sourcedata: ${(endTime - setDataTime).toFixed(2)}ms`);
-                            }
-                            updateTimestamp(pendingFrame);
-                            pendingFrame = null;
-                            setDataTime = null;
+                });
+
+                const geojsonFrames = successfulData.map(data => transformToGeoJSON(data));
+                let frame = geojsonFrames.length - 1;
+
+                function renderLayers() {
+                    const baseMap = new TileLayer({
+                        id: "base-map",
+                        data: [
+                            "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+                            "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+                            "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+                        ],
+                        minZoom: 0,
+                        maxZoom: 19,
+                        tileSize: 256,
+                        renderSubLayers: props => {
+                            const {
+                                bbox: { west, south, east, north }
+                            } = props.tile;
+                            return new BitmapLayer(props, {
+                                data: null,
+                                image: props.data,
+                                bounds: [west, south, east, north]
+                            });
                         }
                     });
-                    
+
+                    const radarLayer = new GeoJsonLayer({
+                        id: "radar-layer",
+                        data: geojsonFrames[frame],
+                        filled: true,
+                        getFillColor: d => d.properties.color,
+                    });
+
+                    mapDeck.setProps({ layers: [baseMap] });
+                    radarDeck.setProps({ layers: [radarLayer] });
+                }
+
+                function updateTimestamp(frameIndex) {
+                    const filename = successfulTimestamps[frameIndex];
+                    const match = filename.match(/(\d{8})_(\d{4})/);
+                    if (match) {
+                        const date = match[1];
+                        const time = match[2];
+                        const year = date.substring(0, 4);
+                        const month = date.substring(4, 6);
+                        const day = date.substring(6, 8);
+                        const hours = parseInt(time.substring(0, 2));
+                        const minutes = time.substring(2, 4);
+
+                        const utcDate = new Date(Date.UTC(year, month - 1, day, hours, minutes));
+                        const localHours = String(utcDate.getHours()).padStart(2, "0");
+                        const localMinutes = String(utcDate.getMinutes()).padStart(2, "0");
+                        const localDay = String(utcDate.getDate()).padStart(2, "0");
+                        const localMonth = String(utcDate.getMonth() + 1).padStart(2, "0");
+                        const localYear = utcDate.getFullYear();
+
+                        document.getElementById("timestamp").textContent =
+                            `${localYear}-${localMonth}-${localDay} ${localHours}:${localMinutes}`;
+                    }
+                }
+
+                function updateFrame(newFrame) {
+                    frame = newFrame;
+                    renderLayers();
                     updateTimestamp(frame);
-                    
-                    // Keyboard navigation
-                    document.addEventListener("keydown", (e) => {
-                        if (e.key === "ArrowRight") {
-                            e.preventDefault();
-                            if (frame < geojsonFrames.length - 1) {
-                                updateFrame(frame + 1);
-                            }
-                        } else if (e.key === "ArrowLeft") {
-                            e.preventDefault();
-                            if (frame > 0) {
-                                updateFrame(frame - 1);
-                            }
-                        }
-                    });
-                    
-                    // Mobile button navigation
-                    let animationTimer = null;
+                }
 
-                    function handleHold(button, action) {
-                        const start = (e) => {
-                            e.preventDefault();
-                            action();
-                            
-                            // After a delay, start repeating the action
-                            animationTimer = setTimeout(() => {
-                                animationTimer = setInterval(action, 100);
-                            }, 300);
-                        };
+                updateTimestamp(frame);
+                renderLayers();
 
-                        const stop = () => {
-                            clearTimeout(animationTimer);
-                            clearInterval(animationTimer);
-                        };
-
-                        // Mouse events
-                        button.addEventListener("mousedown", start);
-                        button.addEventListener("mouseup", stop);
-                        button.addEventListener("mouseleave", stop);
-
-                        // Touch events
-                        button.addEventListener("touchstart", start);
-                        button.addEventListener("touchend", stop);
-                    }
-
-                    // Apply the logic to the previous button
-                    handleHold(document.getElementById("prevBtn"), () => {
+                // Keyboard navigation
+                document.addEventListener("keydown", (e) => {
+                    if (e.key === "ArrowLeft") {
                         if (frame > 0) {
                             updateFrame(frame - 1);
-                        } else {
-                            clearTimeout(animationTimer);
-                            clearInterval(animationTimer);
                         }
-                    });
-
-                    // Apply the logic to the next button
-                    handleHold(document.getElementById("nextBtn"), () => {
+                    } else if (e.key === "ArrowRight") {
                         if (frame < geojsonFrames.length - 1) {
                             updateFrame(frame + 1);
-                        } else {
-                            clearTimeout(animationTimer);
-                            clearInterval(animationTimer);
                         }
-                    });
+                    }
                 });
-        });
+
+                // Mobile button navigation
+                let animationTimer = null;
+                function handleHold(button, action) {
+                    const start = (e) => {
+                        e.preventDefault();
+                        action();
+                        animationTimer = setTimeout(() => {
+                            animationTimer = setInterval(action, 100);
+                        }, 300);
+                    };
+                    const stop = () => {
+                        clearTimeout(animationTimer);
+                        clearInterval(animationTimer);
+                    };
+                    button.addEventListener("mousedown", start);
+                    button.addEventListener("mouseup", stop);
+                    button.addEventListener("mouseleave", stop);
+                    button.addEventListener("touchstart", start);
+                    button.addEventListener("touchend", stop);
+                }
+
+                handleHold(document.getElementById("prevBtn"), () => {
+                    if (frame > 0) {
+                        updateFrame(frame - 1);
+                    } else {
+                        clearTimeout(animationTimer);
+                        clearInterval(animationTimer);
+                    }
+                });
+
+                handleHold(document.getElementById("nextBtn"), () => {
+                    if (frame < geojsonFrames.length - 1) {
+                        updateFrame(frame + 1);
+                    } else {
+                        clearTimeout(animationTimer);
+                        clearInterval(animationTimer);
+                    }
+                });
+            });
 
         function transformToGeoJSON(data) {
             const features = [];
@@ -282,17 +306,20 @@
             for (;;) {
                 let nextLValue = -1;
                 data.areas.forEach(area => {
+                    const hex = area.color == "333e48" ? "ffffff" : area.color;
+                    const r = parseInt(hex.substring(0, 2), 16);
+                    const g = parseInt(hex.substring(2, 4), 16);
+                    const b = parseInt(hex.substring(4, 6), 16);
+                    const color = [r, g, b];
+
                     area.shapes.forEach(shapeGroup => {
-                        color = area.color == "333e48" ? "#ffffff" : '#' + area.color;
                         shapeGroup.forEach(shape => {
                             if (shape.l === lValue) {
                                 const polygonCoordinates = transformShapeToCoordinates(shape, data.coords);
                                 if (polygonCoordinates.length > 0) {
                                     features.push({
                                         type: "Feature",
-                                        properties: {
-                                            color: color
-                                        },
+                                        properties: { color: color },
                                         geometry: {
                                             type: "Polygon",
                                             coordinates: [polygonCoordinates]
@@ -308,7 +335,7 @@
                     });
                 });
 
-                if (nextLValue === -1 || nextLValue >= 6) {
+                if (nextLValue === -1) {
                     break;
                 }
                 lValue = nextLValue;
@@ -337,7 +364,6 @@
                 }
 
                 const [lon, lat] = CHtoWGS(x * 1000, y * 1000);
-
                 path.push([lon, lat]);
 
                 if (2 * charIndex < shape.d.length) {
