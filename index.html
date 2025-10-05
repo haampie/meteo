@@ -22,9 +22,24 @@
         }
 
         html,
-        body,
-        #map {
+        body {
             height: 100%;
+        }
+
+        #map1, #map2 {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        #map1 {
+            z-index: 1;
+        }
+
+        #map2 {
+            z-index: 2;
+            mix-blend-mode: multiply;
         }
 
         #timestamp {
@@ -74,15 +89,25 @@
 </head>
 
 <body>
-    <div id="map"></div>
+    <div id="map1"></div>
+    <div id="map2"></div>
     <div id="timestamp">...</div>
     <div id="controls">
         <button id="prevBtn">←</button>
         <button id="nextBtn">→</button>
     </div>
     <script>
-        const map = new maplibregl.Map({
-            container: "map",
+        const map1 = new maplibregl.Map({
+            container: "map1",
+            style: "https://tiles.openfreemap.org/styles/bright",
+            center: [8.357426707652651, 46.914080187871534],
+            zoom: 7.4,
+            keyboard: false,
+            maplibreLogo: false,
+            attributionControl: false
+        });
+        const map2 = new maplibregl.Map({
+            container: "map2",
             style: {
                 version: 8,
                 sources: {},
@@ -90,10 +115,19 @@
             },
             center: [8.357426707652651, 46.914080187871534],
             zoom: 7.4,
-            keyboard: false
+            keyboard: false,
+            maplibreLogo: false
+        });
+        map2.on('move', () => {
+            map1.jumpTo({
+                center: map2.getCenter(),
+                zoom: map2.getZoom(),
+                bearing: map2.getBearing(),
+                pitch: map2.getPitch()
+            });
         });
 
-        map.on("load", () => {
+        map2.on("load", () => {
             // Generate file list
             const files = [];
             for (let hour = 15; hour < 19; hour++) {
@@ -107,12 +141,12 @@
                 .then(allData => {
                     const geojsonFrames = allData.map(data => transformToGeoJSON(data));
 
-                    map.addSource("radar", {
+                    map2.addSource("radar", {
                         "type": "geojson",
                         "data": geojsonFrames[geojsonFrames.length - 1]
                     });
 
-                    map.addLayer({
+                    map2.addLayer({
                         "id": "radar-layer",
                         "type": "fill",
                         "source": "radar",
@@ -120,42 +154,6 @@
                         "paint": {
                             "fill-color": ["get", "color"],
                             "fill-opacity": 1
-                        }
-                    });
-
-                    map.addSource("carto-base", {
-                        type: "raster",
-                        tiles: [
-                            "https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
-                            "https://b.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
-                            "https://c.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png"
-                        ],
-                        tileSize: 256,
-                    });
-                    map.addLayer({
-                        id: "carto-base-layer",
-                        type: "raster",
-                        source: "carto-base",
-                        paint: {
-                            "raster-opacity": 0.75
-                        }
-                    });
-
-                    map.addSource("carto-labels", {
-                        type: "raster",
-                        tiles: [
-                            "https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
-                            "https://b.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
-                            "https://c.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png"
-                        ],
-                        tileSize: 256
-                    });
-                    map.addLayer({
-                        id: "carto-labels-layer",
-                        type: "raster",
-                        source: "carto-labels",
-                        paint: {
-                            "raster-opacity": 1
                         }
                     });
 
@@ -192,11 +190,11 @@
                         frame = newFrame;
                         pendingFrame = frame;
                         setDataTime = performance.now();
-                        map.getSource("radar").setData(geojsonFrames[frame]);
+                        map2.getSource("radar").setData(geojsonFrames[frame]);
                     }
                     
                     // Update timestamp when source data is loaded
-                    map.on("sourcedata", (e) => {
+                    map2.on("sourcedata", (e) => {
                         if (e.sourceId === "radar" && e.isSourceLoaded && pendingFrame !== null) {
                             const endTime = performance.now();
                             if (setDataTime !== null) {
@@ -278,39 +276,12 @@
 
         function transformToGeoJSON(data) {
             const features = [];
-            
-            // Add white background rectangle based on coordinate bounds
-            const coords = data.coords;
-            const x_min_m = coords.x_min * 1000;
-            const x_max_m = coords.x_max * 1000;
-            const y_min_m = coords.y_min * 1000;
-            const y_max_m = coords.y_max * 1000;
-            
-            const [lon_min, lat_min] = CHtoWGS(x_min_m, y_min_m);
-            const [lon_max, lat_max] = CHtoWGS(x_max_m, y_max_m);
-            
-            features.push({
-                type: "Feature",
-                properties: {
-                    color: "#ffffff"
-                },
-                geometry: {
-                    type: "Polygon",
-                    coordinates: [[
-                        [lon_min, lat_min],
-                        [lon_max, lat_min],
-                        [lon_max, lat_max],
-                        [lon_min, lat_max],
-                        [lon_min, lat_min]
-                    ]]
-                }
-            });
-            
             let lValue = 0;
             for (;;) {
                 let nextLValue = -1;
                 data.areas.forEach(area => {
                     area.shapes.forEach(shapeGroup => {
+                        color = area.color == "333e48" ? "#ffffff" : '#' + area.color;
                         shapeGroup.forEach(shape => {
                             if (shape.l === lValue) {
                                 const polygonCoordinates = transformShapeToCoordinates(shape, data.coords);
@@ -318,7 +289,7 @@
                                     features.push({
                                         type: "Feature",
                                         properties: {
-                                            color: "#" + (area.color == "333e48" ? "ffffff" : area.color)
+                                            color: color
                                         },
                                         geometry: {
                                             type: "Polygon",
