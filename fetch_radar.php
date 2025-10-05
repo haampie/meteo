@@ -48,7 +48,6 @@ foreach ($timestamps as $timestamp) {
     }
 
     file_put_contents($output_compressed, $compressedData);
-    file_put_contents($output, $data);
 }
 
 ?>
