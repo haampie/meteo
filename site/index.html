@@ -150,7 +150,7 @@
 			const hours = String(time.getUTCHours()).padStart(2, "0");
 			const minutes = String(time.getUTCMinutes()).padStart(2, "0");
 			const timeStr = `${year}${month}${day}_${hours}${minutes}`;
-			urls.push(`data/radar_rzc.${timeStr}.json`);
+			urls.push(`https://meteo.harmenstoppels.nl/data/radar_rzc.${timeStr}.json`);
 		}
 
 		Promise.all(urls.map(file => fetch(file, { "mode": "cors" }).then(response => {
