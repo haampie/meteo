@@ -104,6 +104,7 @@
 	</div>
 
 	<script>
+		const timestamp = document.getElementById("timestamp");
 		const { DeckGL, GeoJsonLayer, TileLayer, BitmapLayer } = deck;
 
 		const INITIAL_VIEW_STATE = {
@@ -138,19 +139,21 @@
 		});
 
 		const urls = [];
+		const timestamps = [];
 		const current_time = new Date();
 		current_time.setUTCMinutes(Math.floor(current_time.getUTCMinutes() / 5) * 5);
 		current_time.setUTCSeconds(0);
 		current_time.setUTCMilliseconds(0);
 		for (let minutesAgo = 90; minutesAgo >= 0; minutesAgo -= 5) {
 			const time = new Date(current_time.getTime() - minutesAgo * 60000);
+			timestamps.push(time);
 			const year = time.getUTCFullYear();
 			const month = String(time.getUTCMonth() + 1).padStart(2, "0");
 			const day = String(time.getUTCDate()).padStart(2, "0");
 			const hours = String(time.getUTCHours()).padStart(2, "0");
 			const minutes = String(time.getUTCMinutes()).padStart(2, "0");
 			const timeStr = `${year}${month}${day}_${hours}${minutes}`;
-			urls.push(`https://meteo.harmenstoppels.nl/data/radar_rzc.${timeStr}.json`);
+			urls.push(`/data/radar_rzc.${timeStr}.json`);
 		}
 
 		Promise.all(urls.map(file => fetch(file, { "mode": "cors" }).then(response => {
@@ -162,10 +165,16 @@
 				const successfulTimestamps = [];
 
 				allData.forEach((data, index) => {
-					if (data !== null) {
-						successfulData.push(data);
-						successfulTimestamps.push(urls[index]);
-					}
+					if (data === null) return;
+					const time = timestamps[index];
+					const year = time.getFullYear();
+					const month = String(time.getMonth() + 1).padStart(2, '0');
+					const day = String(time.getDate()).padStart(2, '0');
+					const hours = String(time.getHours()).padStart(2, '0');
+					const minutes = String(time.getMinutes()).padStart(2, '0');
+					const localTime = `${year}-${month}-${day} ${hours}:${minutes}`;
+					successfulData.push(data);
+					successfulTimestamps.push(localTime);
 				});
 
 				const geojsonFrames = successfulData.map(data => transformToGeoJSON(data));
@@ -206,27 +215,7 @@
 				}
 
 				function updateTimestamp(frameIndex) {
-					const filename = successfulTimestamps[frameIndex];
-					const match = filename.match(/(\d{8})_(\d{4})/);
-					if (match) {
-						const date = match[1];
-						const time = match[2];
-						const year = date.substring(0, 4);
-						const month = date.substring(4, 6);
-						const day = date.substring(6, 8);
-						const hours = parseInt(time.substring(0, 2));
-						const minutes = time.substring(2, 4);
-
-						const utcDate = new Date(Date.UTC(year, month - 1, day, hours, minutes));
-						const localHours = String(utcDate.getHours()).padStart(2, "0");
-						const localMinutes = String(utcDate.getMinutes()).padStart(2, "0");
-						const localDay = String(utcDate.getDate()).padStart(2, "0");
-						const localMonth = String(utcDate.getMonth() + 1).padStart(2, "0");
-						const localYear = utcDate.getFullYear();
-
-						document.getElementById("timestamp").textContent =
-							`${localYear}-${localMonth}-${localDay} ${localHours}:${localMinutes}`;
-					}
+					timestamp.textContent = successfulTimestamps[frameIndex];
 				}
 
 				function updateFrame(newFrame) {
@@ -286,45 +275,27 @@
 			});
 
 		function transformToGeoJSON(data) {
-			const features = [];
-			let lValue = 0;
-			for (; ;) {
-				let nextLValue = -1;
-				data.areas.forEach(area => {
-					const hex = area.color == "333e48" ? "ffffff" : area.color;
-					const r = parseInt(hex.substring(0, 2), 16);
-					const g = parseInt(hex.substring(2, 4), 16);
-					const b = parseInt(hex.substring(4, 6), 16);
-					const color = [r, g, b];
+			const allShapes = data.areas.flatMap(area => {
+				const hex = area.color == "333e48" ? "ffffff" : area.color;
+				const r = parseInt(hex.substring(0, 2), 16);
+				const g = parseInt(hex.substring(2, 4), 16);
+				const b = parseInt(hex.substring(4, 6), 16);
+				const color = [r, g, b];
+				return area.shapes.flatMap(shapeGroup =>
+					shapeGroup.map(shape => ({ ...shape, color }))
+				);
+			});
 
-					area.shapes.forEach(shapeGroup => {
-						shapeGroup.forEach(shape => {
-							if (shape.l === lValue) {
-								const polygonCoordinates = transformShapeToCoordinates(shape, data.coords);
-								if (polygonCoordinates.length > 0) {
-									features.push({
-										type: "Feature",
-										properties: { color: color },
-										geometry: {
-											type: "Polygon",
-											coordinates: [polygonCoordinates]
-										}
-									});
-								}
-							} else if (shape.l > lValue) {
-								if (nextLValue === -1 || shape.l < nextLValue) {
-									nextLValue = shape.l;
-								}
-							}
-						});
-					});
-				});
+			allShapes.sort((a, b) => a.l - b.l);
 
-				if (nextLValue === -1) {
-					break;
+			const features = allShapes.map(shape => ({
+				type: "Feature",
+				properties: { color: shape.color },
+				geometry: {
+					type: "Polygon",
+					coordinates: [transformShapeToCoordinates(shape, data.coords)]
 				}
-				lValue = nextLValue;
-			}
+			}));
 
 			return {
 				type: "FeatureCollection",
