@@ -1,6 +1,6 @@
 <?php
 
-$dataDir = __DIR__ . "/data";
+$dataDir = __DIR__ . "/site/data";
 
 if (!is_dir($dataDir)) {
     mkdir($dataDir, 0755, true);
@@ -29,25 +29,9 @@ foreach ($timestamps as $timestamp) {
         continue;
     }
     
-    echo "Fetching: {$url}\n";
-
-    // Initialize cURL
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-    curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (compatible; RadarFetcher/1.0)");
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-
-    // Execute the request
-    $data = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $error = curl_error($ch);
-    curl_close($ch);
-
-    if ($data === false || $httpCode !== 200) {
-        echo "Error fetching {$filename}: {$error}. HTTP Code: {$httpCode}\n";
+    $data = @file_get_contents($url);
+    if ($data === false) {
+        echo "Error fetching {$filename}\n";
         continue;
     }
 
