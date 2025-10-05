@@ -12,7 +12,7 @@ $roundedMinutes = floor($minutes / 5) * 5;
 $now->setTime((int)$now->format("H"), $roundedMinutes, 0);
 
 $timestamps = [];
-for ($i = 0; $i < 10; $i++) {
+for ($i = 0; $i < 24; $i++) {
     $time = clone $now;
     $time->sub(new DateInterval("PT" . ($i * 5) . "M"));
     $timestamps[] = $time->format("Ymd_Hi");
