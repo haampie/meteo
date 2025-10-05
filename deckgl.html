@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Meteo - Deck.gl</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- iOS Web App Configuration -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Meteo">
+
+    <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
+
+    <style>
+        #container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .map-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #radar-container {
+            mix-blend-mode: multiply;
+            pointer-events: none;
+            /* Allow interactions with the map below */
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            touch-action: pan-x pan-y;
+            overscroll-behavior: none;
+        }
+
+        html,
+        body,
+        #container {
+            height: 100%;
+        }
+
+        #timestamp {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 10px 15px;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            font-weight: bold;
+            width: 200px;
+            text-align: center;
+            user-select: none;
+            -webkit-user-select: none;
+            z-index: 3;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 50px;
+            right: 30px;
+            display: flex;
+            gap: 10px;
+            z-index: 3;
+        }
+
+        button {
+            padding: 20px;
+            background-color: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 8px;
+            font-size: 40px;
+            line-height: 1;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            user-select: none;
+            -webkit-user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        button:active {
+            background-color: rgba(200, 200, 200, 0.9);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container">
+        <div id="map-container" class="map-container"></div>
+        <div id="radar-container" class="map-container"></div>
+    </div>
+    <div id="timestamp">...</div>
+    <div id="controls">
+        <button id="prevBtn">←</button>
+        <button id="nextBtn">→</button>
+    </div>
+
+    <script>
+        const { DeckGL, GeoJsonLayer, TileLayer, BitmapLayer } = deck;
+
+        const INITIAL_VIEW_STATE = {
+            longitude: 8.357426707652651,
+            latitude: 46.914080187871534,
+            zoom: 7.4,
+            pitch: 0,
+            bearing: 0
+        };
+
+        const mapDeck = new DeckGL({
+            container: "map-container",
+            initialViewState: INITIAL_VIEW_STATE,
+            controller: {
+                scrollZoom: true,
+                dragPan: true,
+                dragRotate: false,
+                doubleClickZoom: true,
+                touchZoom: true,
+                touchRotate: false,
+                keyboard: false
+            },
+            onViewStateChange: ({ viewState }) => {
+                radarDeck.setProps({ viewState });
+            }
+        });
+
+        const radarDeck = new DeckGL({
+            container: "radar-container",
+            initialViewState: INITIAL_VIEW_STATE,
+            controller: false
+        });
+
+        // Generate file list
+        const files = [];
+        for (let hour = 15; hour < 19; hour++) {
+            for (let minute = 0; minute < 60; minute += 5) {
+                const timeStr = String(hour).padStart(2, "0") + String(minute).padStart(2, "0");
+                files.push(`radar_rzc.20251004_${timeStr}.json`);
+            }
+        }
+
+        Promise.all(files.map(file => fetch(file).then(response => response.json())))
+            .then(allData => {
+                const geojsonFrames = allData.map(data => transformToGeoJSON(data));
+                let frame = geojsonFrames.length - 1;
+
+                function renderLayers() {
+                    const baseMap = new TileLayer({
+                        id: "base-map",
+                        data: [
+                            "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+                            "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+                            "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+                        ],
+                        minZoom: 0,
+                        maxZoom: 19,
+                        tileSize: 256,
+                        renderSubLayers: props => {
+                            const {
+                                bbox: { west, south, east, north }
+                            } = props.tile;
+                            return new BitmapLayer(props, {
+                                data: null,
+                                image: props.data,
+                                bounds: [west, south, east, north]
+                            });
+                        }
+                    });
+
+                    const radarLayer = new GeoJsonLayer({
+                        id: "radar-layer",
+                        data: geojsonFrames[frame],
+                        filled: true,
+                        getFillColor: d => d.properties.color,
+                    });
+
+                    mapDeck.setProps({ layers: [baseMap] });
+                    radarDeck.setProps({ layers: [radarLayer] });
+                }
+
+                function updateTimestamp(frameIndex) {
+                    const filename = files[frameIndex];
+                    const match = filename.match(/(\d{8})_(\d{4})/);
+                    if (match) {
+                        const date = match[1];
+                        const time = match[2];
+                        const year = date.substring(0, 4);
+                        const month = date.substring(4, 6);
+                        const day = date.substring(6, 8);
+                        const hours = parseInt(time.substring(0, 2));
+                        const minutes = time.substring(2, 4);
+
+                        const utcDate = new Date(Date.UTC(year, month - 1, day, hours, minutes));
+                        const localHours = String(utcDate.getHours()).padStart(2, "0");
+                        const localMinutes = String(utcDate.getMinutes()).padStart(2, "0");
+                        const localDay = String(utcDate.getDate()).padStart(2, "0");
+                        const localMonth = String(utcDate.getMonth() + 1).padStart(2, "0");
+                        const localYear = utcDate.getFullYear();
+
+                        document.getElementById("timestamp").textContent =
+                            `${localYear}-${localMonth}-${localDay} ${localHours}:${localMinutes}`;
+                    }
+                }
+
+                function updateFrame(newFrame) {
+                    frame = newFrame;
+                    renderLayers();
+                    updateTimestamp(frame);
+                }
+
+                updateTimestamp(frame);
+                renderLayers();
+
+                // Keyboard navigation
+                document.addEventListener("keydown", (e) => {
+                    if (e.key === "ArrowLeft") {
+                        if (frame > 0) {
+                            updateFrame(frame - 1);
+                        }
+                    } else if (e.key === "ArrowRight") {
+                        if (frame < geojsonFrames.length - 1) {
+                            updateFrame(frame + 1);
+                        }
+                    }
+                });
+
+                // Mobile button navigation
+                let animationTimer = null;
+                function handleHold(button, action) {
+                    const start = (e) => {
+                        e.preventDefault();
+                        action();
+                        animationTimer = setTimeout(() => {
+                            animationTimer = setInterval(action, 100);
+                        }, 300);
+                    };
+                    const stop = () => {
+                        clearTimeout(animationTimer);
+                        clearInterval(animationTimer);
+                    };
+                    button.addEventListener("mousedown", start);
+                    button.addEventListener("mouseup", stop);
+                    button.addEventListener("mouseleave", stop);
+                    button.addEventListener("touchstart", start);
+                    button.addEventListener("touchend", stop);
+                }
+
+                handleHold(document.getElementById("prevBtn"), () => {
+                    if (frame > 0) {
+                        updateFrame(frame - 1);
+                    } else {
+                        clearTimeout(animationTimer);
+                        clearInterval(animationTimer);
+                    }
+                });
+
+                handleHold(document.getElementById("nextBtn"), () => {
+                    if (frame < geojsonFrames.length - 1) {
+                        updateFrame(frame + 1);
+                    } else {
+                        clearTimeout(animationTimer);
+                        clearInterval(animationTimer);
+                    }
+                });
+            });
+
+        function transformToGeoJSON(data) {
+            const features = [];
+            let lValue = 0;
+            for (;;) {
+                let nextLValue = -1;
+                data.areas.forEach(area => {
+                    const hex = area.color == "333e48" ? "ffffff" : area.color;
+                    const r = parseInt(hex.substring(0, 2), 16);
+                    const g = parseInt(hex.substring(2, 4), 16);
+                    const b = parseInt(hex.substring(4, 6), 16);
+                    const color = [r, g, b];
+
+                    area.shapes.forEach(shapeGroup => {
+                        shapeGroup.forEach(shape => {
+                            if (shape.l === lValue) {
+                                const polygonCoordinates = transformShapeToCoordinates(shape, data.coords);
+                                if (polygonCoordinates.length > 0) {
+                                    features.push({
+                                        type: "Feature",
+                                        properties: { color: color },
+                                        geometry: {
+                                            type: "Polygon",
+                                            coordinates: [polygonCoordinates]
+                                        }
+                                    });
+                                }
+                            } else if (shape.l > lValue) {
+                                if (nextLValue === -1 || shape.l < nextLValue) {
+                                    nextLValue = shape.l;
+                                }
+                            }
+                        });
+                    });
+                });
+
+                if (nextLValue === -1) {
+                    break;
+                }
+                lValue = nextLValue;
+            }
+
+            return {
+                type: "FeatureCollection",
+                features: features
+            };
+        }
+
+        function transformShapeToCoordinates(shape, coords) {
+            let i = shape.i;
+            let j = shape.j;
+            const path = [];
+            let charIndex = 0;
+            for (; charIndex < shape.o.length;) {
+                let x, y;
+                const offset = parseInt(shape.o.charAt(charIndex)) / 10 + .05;
+                if (i % 2 == 0) {
+                    x = coords.x_min + (coords.x_max - coords.x_min) * (i / 2) / coords.x_count;
+                    y = coords.y_min + (coords.y_max - coords.y_min) * ((j - 1) / 2 + offset) / coords.y_count;
+                } else {
+                    x = coords.x_min + (coords.x_max - coords.x_min) * ((i - 1) / 2 + offset) / coords.x_count;
+                    y = coords.y_min + (coords.y_max - coords.y_min) * (j / 2) / coords.y_count;
+                }
+
+                const [lon, lat] = CHtoWGS(x * 1000, y * 1000);
+                path.push([lon, lat]);
+
+                if (2 * charIndex < shape.d.length) {
+                    i += shape.d.charCodeAt(2 * charIndex) - 77;
+                    j += shape.d.charCodeAt(2 * charIndex + 1) - 77;
+                }
+                charIndex++;
+            }
+            return path;
+        }
+
+        function LV03_95toCH(e, n) {
+            return {
+                x: e > 1e6 ? e - 2e6 : e,
+                y: n > 1e6 ? n - 1e6 : n
+            }
+        }
+
+        function CHtoWGS(e, n) {
+            return [CHtoWGSlng(e, n), CHtoWGSlat(e, n)]
+        }
+
+        function CHtoWGSlat(e, n) {
+            const t = LV03_95toCH(e, n),
+                r = (t.x - 6e5) / 1e6,
+                o = (t.y - 2e5) / 1e6;
+            let l = 16.9023892 + 3.238272 * o - .270978 * Math.pow(r, 2) - .002528 * Math.pow(o, 2) - .0447 * Math.pow(r, 2) * o - .014 * Math.pow(o, 3);
+            return l * 100 / 36;
+        }
+
+        function CHtoWGSlng(e, n) {
+            const t = LV03_95toCH(e, n),
+                r = (t.x - 6e5) / 1e6,
+                o = (t.y - 2e5) / 1e6;
+            let l = 2.6779094 + 4.728982 * r + .791484 * r * o + .1306 * r * Math.pow(o, 2) - .0436 * Math.pow(r, 3);
+            return l * 100 / 36;
+        }
+    </script>
+</body>
+
+</html>
