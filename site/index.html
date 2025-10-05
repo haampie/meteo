@@ -141,7 +141,7 @@
         current_time.setUTCMinutes(Math.floor(current_time.getUTCMinutes() / 5) * 5);
         current_time.setUTCSeconds(0);
         current_time.setUTCMilliseconds(0);
-        for (let minutesAgo = 120; minutesAgo >= 0; minutesAgo -= 5) {
+        for (let minutesAgo = 90; minutesAgo >= 0; minutesAgo -= 5) {
             const time = new Date(current_time.getTime() - minutesAgo * 60000);
             const year = time.getUTCFullYear();
             const month = String(time.getUTCMonth() + 1).padStart(2, "0");
