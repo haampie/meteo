@@ -137,6 +137,8 @@
 			controller: false
 		});
 
+		var initialOffset = 0;
+
 		const urls = [];
 		const timestamps = [];
 		const current_time = new Date();
@@ -233,6 +235,20 @@
 						updateFrame(frame + 1);
 					}
 				});
+
+				const step = 50;
+				document.addEventListener("wheel", (e) => {
+					initialOffset += e.deltaX;
+					if (Math.abs(initialOffset) > step * 1.5) initialOffset = 0;
+
+					if (initialOffset > step && frame > 0) {
+						initialOffset = 0;
+						updateFrame(frame - 1);
+					} else if (initialOffset < -step && frame < geojsonFrames.length - 1) {
+						initialOffset = 0;
+						updateFrame(frame + 1);
+					}
+				}, { passive: false });
 
 				let animationTimer = null;
 				function handleHold(button, action) {
